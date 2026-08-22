@@ -1,0 +1,178 @@
+#!/usr/bin/env python3
+"""CapsWriter 2.6 self-client for the always-on HTTP transcription service.
+
+This is a general user-facing CLI, not Hermes-specific. It talks to the
+CapsWriter HTTP service running in the LXC `agents` container:
+
+    http://10.51.192.43:9600/transcribe
+
+The server performs the full CapsWriter 2.6 file transcription pipeline:
+WebSocket audio upload -> ASR -> phoneme RAG hotword correction -> regex rule
+replacement -> timestamp sync -> TXT/SRT/JSON files.
+
+Usage:
+    ~/scripts/caps-transcribe /data/audio.m4a
+    ~/scripts/caps-transcribe /data/audio.m4a -o ~/transcripts
+    ~/scripts/caps-transcribe --health
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import shutil
+import sys
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
+from typing import Any
+
+DEFAULT_SERVER = "http://10.51.192.43:9600"
+DEFAULT_TIMEOUT = 3600
+
+
+def request_json(url: str, payload: dict[str, Any] | None = None, timeout: int = DEFAULT_TIMEOUT) -> tuple[int, dict[str, Any]]:
+    data = None
+    method = "GET"
+    headers = {"Accept": "application/json", "User-Agent": "caps-transcribe-self-client/1.0"}
+    if payload is not None:
+        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        method = "POST"
+        headers["Content-Type"] = "application/json; charset=utf-8"
+    req = urllib.request.Request(url, data=data, method=method, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read().decode("utf-8", "replace")
+            status = resp.status
+    except urllib.error.HTTPError as e:
+        raw = e.read().decode("utf-8", "replace")
+        status = e.code
+    try:
+        body = json.loads(raw) if raw else {}
+    except json.JSONDecodeError as e:
+        raise RuntimeError(f"server returned invalid JSON: HTTP {status}; {e}; body={raw[:500]!r}") from e
+    if not isinstance(body, dict):
+        raise RuntimeError(f"server returned unexpected JSON shape: {type(body).__name__}")
+    return status, body
+
+
+def copy_outputs(files: dict[str, Any], output_dir: Path) -> dict[str, str]:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    copied: dict[str, str] = {}
+    for label, src_value in files.items():
+        if not isinstance(src_value, str) or not src_value:
+            continue
+        src = Path(src_value)
+        if not src.exists():
+            # The returned path may be inside the agents container but not mounted
+            # at the same path on the caller side. Keep it visible in stdout.
+            continue
+        dest = output_dir / src.name
+        if src.resolve() != dest.resolve():
+            shutil.copy2(src, dest)
+        copied[label] = str(dest)
+    return copied
+
+
+def write_stdout_copy(text: str, output_dir: Path, audio_path: Path) -> str:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    dest = output_dir / f"{audio_path.stem}.stdout.txt"
+    dest.write_text(text, encoding="utf-8")
+    return str(dest)
+
+
+def render_text(result: dict[str, Any], copied: dict[str, str] | None = None, stdout_file: str | None = None, raw_json_file: str | None = None) -> str:
+    lines: list[str] = []
+    ok = result.get("ok") is True
+    lines.append("CapsWriter 转录" + ("成功" if ok else "失败"))
+    if result.get("error"):
+        lines.append(f"错误：{result['error']}")
+
+    files = result.get("files") if isinstance(result.get("files"), dict) else {}
+    if files:
+        lines.append("")
+        lines.append("服务端输出文件：")
+        for key in ("txt", "srt", "json"):
+            if files.get(key):
+                lines.append(f"- {key}: {files[key]}")
+
+    if copied:
+        lines.append("")
+        lines.append("本地复制文件：")
+        for key in ("txt", "srt", "json"):
+            if copied.get(key):
+                lines.append(f"- {key}: {copied[key]}")
+
+    if stdout_file:
+        lines.append(f"- stdout: {stdout_file}")
+    if raw_json_file:
+        lines.append(f"- raw_json: {raw_json_file}")
+
+    text = result.get("text")
+    if isinstance(text, str):
+        lines.append("")
+        lines.append("转录文本：")
+        lines.append(text.rstrip())
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="CapsWriter 2.6 HTTP 文件转录 self-client")
+    parser.add_argument("audio", nargs="?", help="音频/视频文件路径；必须是 caps-transcribe 服务端也能看到的路径，推荐放在 /data 下")
+    parser.add_argument("-s", "--server", default=DEFAULT_SERVER, help=f"服务端地址，默认 {DEFAULT_SERVER}")
+    parser.add_argument("-o", "--output-dir", help="把服务端生成的 txt/srt/json 复制到此目录，并额外保存 stdout/raw JSON")
+    parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT, help=f"请求超时秒数，默认 {DEFAULT_TIMEOUT}")
+    parser.add_argument("--json", action="store_true", help="stdout 输出原始 JSON，而不是人类可读文本")
+    parser.add_argument("--no-copy", action="store_true", help="即使指定 -o，也不复制服务端输出文件，只保存 stdout/raw JSON")
+    parser.add_argument("--health", action="store_true", help="检查服务健康状态")
+    args = parser.parse_args()
+
+    server = args.server.rstrip("/")
+
+    if args.health:
+        status, body = request_json(f"{server}/health", timeout=min(args.timeout, 30))
+        print(json.dumps({"http_status": status, **body}, ensure_ascii=False, indent=2))
+        return 0 if status == 200 and body.get("status") == "ok" else 1
+
+    if not args.audio:
+        parser.error("missing audio path (or use --health)")
+
+    audio_path = Path(args.audio).expanduser()
+    if not audio_path.exists():
+        print(f"本地文件不存在：{audio_path}", file=sys.stderr)
+        print("提示：如果文件只在 agents 容器内存在，请传容器内路径并加 --no-local-check 之类的能力；当前版本要求调用侧也能看到该路径。", file=sys.stderr)
+        return 2
+
+    started = time.time()
+    status, result = request_json(f"{server}/transcribe", {"file": str(audio_path)}, timeout=args.timeout)
+    result.setdefault("http_status", status)
+    result["client_elapsed_sec"] = round(time.time() - started, 3)
+
+    copied: dict[str, str] = {}
+    stdout_file = None
+    raw_json_file = None
+
+    rendered = render_text(result)
+
+    if args.output_dir:
+        outdir = Path(args.output_dir).expanduser()
+        if not args.no_copy:
+            files = result.get("files") if isinstance(result.get("files"), dict) else {}
+            copied = copy_outputs(files, outdir)
+        raw_json_file = str(outdir / f"{audio_path.stem}.caps-result.json")
+        outdir.mkdir(parents=True, exist_ok=True)
+        Path(raw_json_file).write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        rendered = render_text(result, copied=copied, raw_json_file=raw_json_file)
+        stdout_file = write_stdout_copy(rendered, outdir, audio_path)
+        rendered = render_text(result, copied=copied, stdout_file=stdout_file, raw_json_file=raw_json_file)
+
+    if args.json:
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+    else:
+        print(rendered, end="")
+
+    return 0 if status == 200 and result.get("ok") is True else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

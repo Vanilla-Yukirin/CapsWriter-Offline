@@ -1,0 +1,15 @@
+[Unit]
+Description=CapsWriter 2.6 HTTP 文件转录服务
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/data/CapsWriter-Offline/.venv/bin/python /root/scripts/caps-client/server.py --host 0.0.0.0 --port 9600
+WorkingDirectory=/data/CapsWriter-Offline
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

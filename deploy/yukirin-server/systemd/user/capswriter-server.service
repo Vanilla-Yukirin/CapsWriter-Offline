@@ -1,0 +1,31 @@
+[Unit]
+Description=CapsWriter-Offline 2.6 ASR server (Qwen3-ASR-1.7B via Vulkan) — upgraded 2026-07-05
+Documentation=https://github.com/HaujetZhao/CapsWriter-Offline
+After=network-online.target
+Wants=network-online.target
+
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+
+WorkingDirectory=/data/CapsWriter-Offline
+# Use the host-only interpreter entry. The shared .venv/bin/python currently
+# belongs to the agents container and must not be used by the host service.
+ExecStart=/data/CapsWriter-Offline/.venv/bin/python-host /data/CapsWriter-Offline/core_server.py
+
+Restart=on-failure
+RestartSec=5
+
+KillSignal=SIGTERM
+TimeoutStopSec=20s
+
+PrivateTmp=true
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/data/CapsWriter-Offline %h/.cache
+
+[Install]
+WantedBy=default.target

@@ -19,11 +19,11 @@ class ServerConfig:
     format_num = True       # 输出时是否将中文数字转为阿拉伯数字
     format_spell = True     # 输出时是否调整中英之间的空格
 
-    enable_tray = True        # 是否启用托盘图标功能
+    enable_tray = False       # Linux 服务端无 GUI 托盘
     hotwords_path = Path() / 'hot-server.txt' # 全局热词配置文件路径
 
     # 日志配置
-    log_level = 'DEBUG'        # 日志级别：'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'
+    log_level = 'INFO'        # 日志级别：'DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'
     aligner_idle_timeout = 10  # 对齐引擎空闲多少秒后自动释放显存 (0 表示不释放)
 
     # GPU 预加速配置（有识别任务时，提前调高显存频率，降低延迟，需管理员权限运行）
@@ -49,7 +49,7 @@ class ModelPaths:
     """模型文件路径配置"""
 
     # 基础目录
-    model_dir = Path() / 'models'
+    model_dir = Path(BASE_DIR) / 'models'
 
     # Paraformer 模型路径
     paraformer_dir = model_dir / 'Paraformer' / "speech_paraformer-large-vad-punc_asr_nat-zh-cn-16k-common-vocab8404-onnx"

@@ -23,8 +23,11 @@ from core.logger import get_logger, setup_logger
 setup_logger('client', level=Config.log_level)
 logger = get_logger('client')
 
-# 门面类
-from core.client.app import CapsWriterClient
+# 门面类（仅在 GUI 环境下导入，headless 服务端可跳过）
+try:
+    from core.client.app import CapsWriterClient
+except ImportError:
+    CapsWriterClient = None  # type: ignore
 
 __all__ = [
     'CapsWriterClient',
