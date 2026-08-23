@@ -34,6 +34,7 @@ class DeploymentProfileTests(unittest.TestCase):
         )
         self.assertIn("-m capswriter_plus.api.client", wrapper)
         self.assertIn("/etc/capswriter/capswriter.env", wrapper)
+        self.assertIn("cd /data/CapsWriter-Offline", wrapper)
         self.assertNotIn("--token", wrapper)
 
 

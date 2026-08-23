@@ -15,5 +15,6 @@ set +a
 : "${CAPSWRITER_TOKEN:?CAPSWRITER_TOKEN is required}"
 : "${CAPSWRITER_API_URL:?CAPSWRITER_API_URL is required}"
 
+cd /data/CapsWriter-Offline
 exec /data/CapsWriter-Offline/.venv/bin/python \
     -m capswriter_plus.api.client "$@"
