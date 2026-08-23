@@ -1,0 +1,19 @@
+#!/bin/sh
+set -eu
+
+capswriter_env_file="${CAPSWRITER_ENV_FILE:-/etc/capswriter/capswriter.env}"
+if [ ! -r "$capswriter_env_file" ]; then
+    echo "CapsWriter environment file is not readable: $capswriter_env_file" >&2
+    exit 1
+fi
+
+set -a
+# shellcheck disable=SC1090
+. "$capswriter_env_file"
+set +a
+
+: "${CAPSWRITER_TOKEN:?CAPSWRITER_TOKEN is required}"
+: "${CAPSWRITER_API_URL:?CAPSWRITER_API_URL is required}"
+
+exec /data/CapsWriter-Offline/.venv/bin/python \
+    -m capswriter_plus.api.client "$@"

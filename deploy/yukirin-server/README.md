@@ -1,209 +1,174 @@
-# yukirin-server Linux deployment
+# yukirin-server deployment profile
 
-This directory backs up the CapsWriter deployment-specific files used by
-`yukirin-server` and its `agents` LXC container.
+This directory contains the host- and LXC-specific deployment profile used to
+validate the cross-platform CapsWriter Plus product. Private topology belongs
+here; it is not a requirement or a concept exposed by the generic Web UI.
 
-Snapshot date: 2026-08-23 CST.
+Snapshot date: 2026-08-23 CST. Before every operation, verify the live paths,
+units, listeners, process owners and file hashes again.
 
-Upstream base:
+## Product and deployment boundary
 
-- repository: `HaujetZhao/CapsWriter-Offline`
-- branch: `master`
-- commit: `7d7fac3541a998be10ebf15102f7884a7dd36edb`
-- latest release at snapshot time: `v2.6`
+The repository implements three independent server-side entry points:
 
-## Runtime topology
+| Port | Protocol | Product role | Authentication |
+| --- | --- | --- | --- |
+| 6016/TCP | WebSocket | low-latency ASR for CapsWriter clients | required Bearer token |
+| 6017/TCP | HTTP | loopback-only read-only Web UI | same token, then session cookie |
+| 6018/TCP | HTTP | uploaded-file API for Agents, CLI and CI | same Bearer token |
+
+All ports are configurable. Official optional `6017/UDP` result broadcast and
+`6018/UDP` recording control are client features and do not conflict with these
+TCP listeners.
+
+The host runs the model exactly once, in the 6016 process. The 6018 API streams
+uploaded media into temporary storage, decodes it with ffmpeg and calls 6016;
+it does not load another model. The Web UI gets ASR/device state from the
+running ASR process. It does not infer health from systemd, containers,
+`nvidia-smi`, process names or fixed hardware vendors.
+
+## Target host topology
 
 ```text
 yukirin-server host
-└─ capswriter-server.service
-   ├─ /data/CapsWriter-Offline/core_server.py
-   ├─ /data/CapsWriter-Offline/.venv/bin/python-host
-   ├─ Qwen3-ASR-1.7B + Vulkan / RTX 3080
-   └─ WebSocket 0.0.0.0:6016
+├─ capswriter-server.service
+│  ├─ /data/CapsWriter-Offline/core_server.py
+│  ├─ Qwen3-ASR-1.7B and the configured CPU/GPU backends
+│  └─ WebSocket 0.0.0.0:6016
+├─ capswriter-webui.service
+│  └─ HTTP 127.0.0.1:6017
+└─ capswriter-api.service
+   ├─ /data/CapsWriter-Offline/core_api.py
+   ├─ FastAPI/Uvicorn, no model copy
+   └─ HTTP 0.0.0.0:6018 for the private host/LXC network
 
 agents LXC
-└─ caps-transcribe.service
-   ├─ /root/scripts/caps-client/server.py
-   ├─ HTTP 0.0.0.0:9600
-   └─ WebSocket upstream 10.51.192.1:6016
+├─ /root/scripts/caps-transcribe-api -> host 6018 (primary after migration)
+└─ caps-transcribe.service -> HTTP 0.0.0.0:9600 (legacy rollback path)
 ```
 
-The host owns the ASR model, GPU inference and WebSocket service. The container
-owns only the HTTP wrapper and client-side hotword post-processing.
+The LXC neither starts `core_server.py` nor loads an ASR model. The old 9600
+wrapper accepts a shared server path and depends on `/data`; it is retained only
+for compatibility while callers move to the standard upload API.
 
-## Phase 0 authentication
+## One global token
 
-The custom branch requires one global Bearer token for every WebSocket client.
-The server validates it during the HTTP Upgrade handshake, before accepting a
-WebSocket connection. Both missing configuration and tokens shorter than 16
-characters fail closed before model loading.
+Every protected product endpoint uses exactly one `CAPSWRITER_TOKEN`. There are
+no separate Web UI, API, Agent or client tokens. The token must contain at least
+16 characters, is never committed, and is never accepted in a URL.
 
-Host configuration:
+Host file (mode `0600`):
 
 ```text
 ~/.config/capswriter/capswriter.env
 CAPSWRITER_TOKEN=<at-least-16-random-characters>
 ```
 
-Create the directory with mode `0700` and the file with mode `0600`. The user
-unit loads this required file with `EnvironmentFile`; it isn't optional and it
-must never be committed. A non-secret template is tracked at
-`config/capswriter-server.env.example`.
-
-The `agents` LXC must receive the same token because its HTTP wrapper uses the
-CapsWriter `WebSocketManager` as an ASR client:
+LXC file (root-owned, mode `0600`):
 
 ```text
 /etc/capswriter/capswriter.env
 CAPSWRITER_TOKEN=<same-token-as-host>
 CAPSWRITER_SERVER_URL=ws://10.51.192.1:6016
+CAPSWRITER_API_URL=http://10.51.192.1:6018
 ```
 
-The LXC file must be owned by root with mode `0600`. Its tracked template is
-`lxc/agents/capswriter-client.env.example`.
+Missing or short tokens fail before startup. Invalid authentication attempts
+use per-source delays of 250 ms, 500 ms, 1 second and 2 seconds; the fifth and
+later attempts return 429 with `Retry-After`. Records decay after five minutes
+and successful authentication clears the source. Logs never include token
+values. Public traffic must additionally use HTTPS/WSS; Bearer authentication
+is not transport encryption.
 
-External clients may provide a complete URL, including TLS and a reverse-proxy
-path:
+## 6018 HTTP/Agent API
 
-```text
-CAPSWRITER_SERVER_URL=wss://caps.example.com/asr
-CAPSWRITER_TOKEN=<same-token-as-host>
-```
+The generic contract is documented in
+[`docs/CapsWriter-Plus-HTTP-API.md`](../../docs/CapsWriter-Plus-HTTP-API.md).
+It accepts raw media bytes rather than a server pathname and has explicit size,
+duration, queue, concurrency and request timeout limits. Swagger/OpenAPI are
+served by the same process.
 
-`config_client.py` retains `addr` and `port` as a fallback for old local
-configuration, but `CAPSWRITER_SERVER_URL` takes precedence. Tokens embedded in
-URLs are rejected.
-
-Failed handshakes are tracked per source address. The first four failures wait
-250 ms, 500 ms, 1 second and 2 seconds; later failures return HTTP 429 with
-`Retry-After`. Records expire after five minutes without another failure, and
-a successful authentication clears that source immediately. Only new
-handshakes are affected, and logs contain the source and result but never the
-token.
-
-Enabling authentication is a coordinated cutover: prepare the host and all
-clients first, then restart the host and LXC services in one maintenance
-window. Verify missing, incorrect and correct credentials separately. Do not
-expose a token over public `ws://`; use HTTPS/WSS at the public endpoint.
-
-## Phase 1A local Web UI
-
-`capswriter-webui.service` is a separate standard-library HTTP process. It
-listens only on `127.0.0.1:6017`; the application rejects non-loopback bind
-addresses at startup. Starting, stopping or restarting this unit does not
-restart the ASR worker on port 6016.
-
-The MVP provides:
-
-- token login with an in-memory, 12-hour session cookie;
-- ASR, worker, Web UI, wrapper and GPU status;
-- incremental read-only viewing of the fixed `server_latest.log` path;
-- an allowlisted read-only configuration page;
-- a minimal unauthenticated `/health` endpoint.
-
-All operational APIs require the same global token, either as a Bearer token or
-through the login session. Invalid form logins and invalid Bearer credentials
-use the same per-source delay and 429 protection as Phase 0. Session identifiers
-are kept as SHA-256 digests in memory, and a service restart invalidates them.
-The Web UI never returns the global token.
-
-Optional, non-secret runtime metadata belongs in:
-
-```text
-~/.config/capswriter/webui.env
-```
-
-Start from `config/webui.env.example`. Keep this local file out of Git even
-though it should contain only deployment metadata. The token remains solely in
-the required `capswriter.env`. Phase 1A uses a non-`Secure` cookie because the
-only supported access is loopback HTTP or an SSH tunnel; a future HTTPS ingress
-must set `CAPSWRITER_WEBUI_SECURE_COOKIE=1`.
-
-After installing the user unit, enable it independently:
+The deployment profile uses `config/api.env.example` for non-secret settings.
+The required token remains only in `capswriter.env`. Install and start the user
+unit independently:
 
 ```text
 systemctl --user daemon-reload
-systemctl --user enable --now capswriter-webui.service
+systemctl --user enable --now capswriter-api.service
 ```
 
-To access it without configuring public ingress:
+An Agent can use the tracked one-shot wrapper after installing it as
+`/root/scripts/caps-transcribe-api`:
+
+```text
+/root/scripts/caps-transcribe-api recording.m4a --format json
+```
+
+The wrapper sources the root-only environment file and invokes the generic
+streaming Python client. It does not put the token in arguments or a URL.
+
+## 6017 Web UI
+
+`capswriter-webui.service` is a separate standard-library HTTP process and is
+hard-limited by the application to a loopback listener. It provides token
+login, ASR/model/device self-report, optional 6018 readiness, incremental logs,
+read-only configuration and a minimal unauthenticated health endpoint. It does
+not display the private LXC or legacy wrapper.
+
+Use `config/webui.env.example` for non-secret metadata. To access it without a
+public ingress:
 
 ```text
 ssh -L 16017:127.0.0.1:6017 yukirin-server
 ```
 
-Then open `http://127.0.0.1:16017/` and enter the existing global token. This
-phase intentionally does not change FRP, Puck, certificates, public listeners,
-hotwords, model lifecycle or TTS.
+Then open `http://127.0.0.1:16017/`. A future HTTPS ingress must set
+`CAPSWRITER_WEBUI_SECURE_COOKIE=1`. This profile does not configure Puck, FRP,
+certificates, public listeners, hotword editing, model reload or TTS.
 
-## Tracked customizations
+## Development and promotion workflow
 
-Files at repository root mirror the deployed source changes:
+The development checkout is `/home/vanilla/repos/CapsWriter-Offline`. Pull the
+feature branch there, use the existing host Python/GPU for isolated tests, and
+commit and push small changes. Run Windows compatibility checks from a separate
+clone. `/data/CapsWriter-Offline` remains production and is not a Git checkout.
 
-- `core_server.py`: Linux launcher for `CapsWriterServer`.
-- `config_server.py`: headless mode, INFO logging and absolute model path.
-- `config_client.py`: LXD host bridge target `10.51.192.1:6016`.
-- `core/client/__init__.py`: tolerate missing GUI dependencies in headless use.
+Only after both sides pass:
 
-Deployment artifacts:
+1. re-check the live baseline and create a timestamped backup;
+2. install pinned API dependencies into the production host interpreter;
+3. copy the reviewed source without overwriting `.venv`, models, logs or local
+   configuration;
+4. install/reload units and verify 6016, then 6018, then 6017;
+5. perform an authenticated real transcription through 6018;
+6. back up active Agent skills/config and migrate them to 6018;
+7. keep 9600 running until a later, separately approved retirement.
 
-- `systemd/user/capswriter-server.service`: host user service.
-- `systemd/user/capswriter-webui.service`: loopback-only read-only Web UI.
-- `config/webui.env.example`: optional, non-secret Web UI runtime metadata.
-- `scripts/caps-transcribe`: host-facing HTTP self-client.
-- `lxc/agents/caps-client/server.py`: full CapsWriter HTTP wrapper.
-- `lxc/agents/caps_client.py`: legacy direct WebSocket CLI.
-- `lxc/agents/caps-transcribe.service`: container system service.
-- `manifests/`: deployed Python packages and binary/model checksums.
-
-## Deliberately excluded
-
-The following runtime state is not committed to this public fork:
-
-- model weights and `.venv` binaries;
-- personal `hot.txt`, `hot-rule.txt`, `hot-server.txt` and
-  `/data/hot-2.6-local`;
-- logs, transcripts and generated TXT/SRT/JSON files;
-- FRP configuration, tokens, credentials and private Agent memory;
-- compiled Linux `.so` files.
-
-Models are downloaded from the upstream `models` release. At this snapshot the
-active model files live in:
-
-```text
-/data/CapsWriter-Offline/models/Qwen3-ASR/Qwen3-ASR-1.7B/
-```
-
-The Linux llama.cpp runtime is build `b7798`; deployed library checksums are in
-`manifests/llama-b7798-linux-vulkan.sha256`.
+Rollback restores the timestamped production source and user units. Agent
+rollback restores the timestamped skill/config backup and immediately returns
+callers to the still-running 9600 service.
 
 ## Interpreter split
 
-`/data` is shared with `agents` through an LXD shifted disk mount. The shared
-venv therefore has two interpreter entry points:
+`/data` is shared with `agents` through an LXD shifted disk mount. Do not change
+ownership or repoint either interpreter:
 
 ```text
-.venv/bin/python
-  -> /root/.local/bin/python3.13
-
-.venv/bin/python-host
-  -> /home/vanilla/.local/share/uv/python/cpython-3.13-linux-x86_64-gnu/bin/python3.13
+host:   /data/CapsWriter-Offline/.venv/bin/python-host
+agents: /data/CapsWriter-Offline/.venv/bin/python
 ```
 
-The host unit must use `python-host`. Do not repoint the shared default
-`python`, because doing so can break the container or cause host
-`status=203/EXEC`.
+The host units must use `python-host`; LXC commands must use `python`.
 
-## Health semantics
+## Tracked artifacts and exclusions
 
-The HTTP wrapper opens a WebSocket only for a transcription job and disconnects
-afterwards. An idle response is healthy:
+- `systemd/user/`: three independent host user services.
+- `config/`: non-secret host environment templates.
+- `lxc/agents/caps-transcribe-api`: primary one-shot 6018 client.
+- `lxc/agents/caps-client/server.py` and `caps-transcribe.service`: unchanged
+  legacy 9600 rollback path.
+- `manifests/`: deployed package and binary/model checksums.
 
-```json
-{"status":"ok","connected":false}
-```
-
-Before restoring or deploying, verify paths, checksums, systemd units and both
-network hops. Do not treat this backup branch as proof that the live service was
-restarted or deployed from the branch.
+Model weights, virtual environments, personal hotwords, logs, transcripts,
+generated outputs, credentials, private Agent memory, FRP configuration and
+compiled Linux libraries are deliberately excluded from the public fork.
