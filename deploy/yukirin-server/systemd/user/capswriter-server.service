@@ -11,6 +11,7 @@ StartLimitBurst=5
 Type=simple
 
 WorkingDirectory=/data/CapsWriter-Offline
+EnvironmentFile=%h/.config/capswriter/capswriter.env
 # Use the host-only interpreter entry. The shared .venv/bin/python currently
 # belongs to the agents container and must not be used by the host service.
 ExecStart=/data/CapsWriter-Offline/.venv/bin/python-host /data/CapsWriter-Offline/core_server.py

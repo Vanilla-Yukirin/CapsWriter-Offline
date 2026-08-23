@@ -9,6 +9,10 @@ WebSocket 管理器 (SocketManager)
 import asyncio
 import functools
 import websockets
+from capswriter_plus.security import (
+    create_websocket_auth_process_request,
+    load_required_token,
+)
 from config_server import ServerConfig as Config
 from .ws_recv import ws_recv
 from .ws_send import ws_send
@@ -25,6 +29,13 @@ class SocketManager:
         self.app = app
         self._is_running = False
         self._server = None  # websockets.serve 返回的 server 对象
+        # 在模型加载前读取并校验密钥；缺失时服务端 fail closed。
+        self._api_token = load_required_token()
+        self._process_request = create_websocket_auth_process_request(
+            self._api_token,
+            websockets.__version__,
+            logger.warning,
+        )
 
     def _check_port(self):
         """检查端口可用性"""
@@ -67,7 +78,8 @@ class SocketManager:
             Config.addr,
             Config.port,
             subprotocols=["binary"],
-            max_size=None
+            max_size=None,
+            process_request=self._process_request,
         ) as server:
             self._server = server  # 保存 server 引用，用于外部关闭
 

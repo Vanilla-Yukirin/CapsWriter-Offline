@@ -32,6 +32,54 @@ agents LXC
 The host owns the ASR model, GPU inference and WebSocket service. The container
 owns only the HTTP wrapper and client-side hotword post-processing.
 
+## Phase 0 authentication
+
+The custom branch requires one global Bearer token for every WebSocket client.
+The server validates it during the HTTP Upgrade handshake, before accepting a
+WebSocket connection. Both missing configuration and tokens shorter than 32
+characters fail closed before model loading.
+
+Host configuration:
+
+```text
+~/.config/capswriter/capswriter.env
+CAPSWRITER_TOKEN=<at-least-32-random-characters>
+```
+
+Create the directory with mode `0700` and the file with mode `0600`. The user
+unit loads this required file with `EnvironmentFile`; it isn't optional and it
+must never be committed. A non-secret template is tracked at
+`config/capswriter-server.env.example`.
+
+The `agents` LXC must receive the same token because its HTTP wrapper uses the
+CapsWriter `WebSocketManager` as an ASR client:
+
+```text
+/etc/capswriter/capswriter.env
+CAPSWRITER_TOKEN=<same-token-as-host>
+CAPSWRITER_SERVER_URL=ws://10.51.192.1:6016
+```
+
+The LXC file must be owned by root with mode `0600`. Its tracked template is
+`lxc/agents/capswriter-client.env.example`.
+
+External clients may provide a complete URL, including TLS and a reverse-proxy
+path:
+
+```text
+CAPSWRITER_SERVER_URL=wss://caps.example.com/asr
+CAPSWRITER_TOKEN=<same-token-as-host>
+```
+
+`config_client.py` retains `addr` and `port` as a fallback for old local
+configuration, but `CAPSWRITER_SERVER_URL` takes precedence. Tokens embedded in
+URLs are rejected.
+
+Enabling authentication is a coordinated cutover: prepare the host and all
+clients first, then restart the host and LXC services in one maintenance
+window. Verify missing, incorrect and correct credentials separately. Do not
+expose a token over public `ws://`; use HTTPS/WSS at the public endpoint.
+
 ## Tracked customizations
 
 Files at repository root mirror the deployed source changes:

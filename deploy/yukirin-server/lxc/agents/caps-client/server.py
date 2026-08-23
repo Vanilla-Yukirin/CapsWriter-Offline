@@ -30,6 +30,7 @@ CAPS_DIR = Path('/data/CapsWriter-Offline')
 sys.path.insert(0, str(CAPS_DIR))
 
 from config_client import ClientConfig as Config
+from capswriter_plus.security import SecurityConfigError
 from core.client.state import ClientState, console
 from core.client.connection import WebSocketManager
 from core.client.transcribe.file_transcriber import FileTranscriber
@@ -200,4 +201,7 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    try:
+        main()
+    except SecurityConfigError as exc:
+        raise SystemExit(f"CapsWriter HTTP 包装层启动失败：{exc}") from exc

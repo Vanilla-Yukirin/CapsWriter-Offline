@@ -4,6 +4,7 @@ After=network.target
 
 [Service]
 Type=simple
+EnvironmentFile=/etc/capswriter/capswriter.env
 ExecStart=/data/CapsWriter-Offline/.venv/bin/python /root/scripts/caps-client/server.py --host 0.0.0.0 --port 9600
 WorkingDirectory=/data/CapsWriter-Offline
 Restart=always

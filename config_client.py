@@ -14,6 +14,10 @@ class ClientConfig:
     addr = '10.51.192.1'          # Server 地址（宿主机）
     port = '6016'               # Server 端口
 
+    # 优先使用完整 WebSocket URL，支持公网 wss:// 域名和路径。
+    # 未设置时回退到上面的 addr/port，保持旧配置兼容。
+    server_url = os.getenv('CAPSWRITER_SERVER_URL', '').strip() or f'ws://{addr}:{port}'
+
     # 快捷键配置列表
     shortcuts = [
         {
@@ -130,4 +134,3 @@ r"""
   {'key': 'f12', 'type': 'keyboard', 'suppress': True, 'hold_mode': True, 'enabled': True}, 
   {'key': 'x2', 'type': 'mouse', 'suppress': True, 'hold_mode': True, 'enabled': True}, 
 """
-

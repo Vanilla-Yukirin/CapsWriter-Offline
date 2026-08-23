@@ -14,6 +14,13 @@ from typing import TYPE_CHECKING, Optional
 import websockets
 from websockets.exceptions import ConnectionClosedError, ConnectionClosedOK
 
+from capswriter_plus.security import (
+    load_required_token,
+    resolve_server_url,
+    websocket_client_auth_kwargs,
+    websocket_major_version,
+    websocket_url_is_local,
+)
 from config_client import ClientConfig as Config
 from core.protocol import AudioMessage, RecognitionMessage
 from ..state import console
@@ -52,6 +59,12 @@ class WebSocketManager:
         """
         self.app = app
         self._connect_fail_logged = False  # 断联后只记一次失败日志
+        self.server_url = resolve_server_url(
+            getattr(Config, 'server_url', None),
+            addr=Config.addr,
+            port=Config.port,
+        )
+        self.api_token = load_required_token()
 
     @property
     def state(self) -> ClientState:
@@ -80,7 +93,7 @@ class WebSocketManager:
         if self.state.websocket is not None:
             self.state.websocket = None
 
-        url = f"ws://{Config.addr}:{Config.port}"
+        url = self.server_url
 
         try:
             if not self._connect_fail_logged:
@@ -92,9 +105,13 @@ class WebSocketManager:
                 max_size=None,
                 max_queue=None,  # 防止文件过大时，只发送，来不及消费结果，接收队列填满导致 pause_reading
             )
+            kwargs.update(websocket_client_auth_kwargs(self.api_token, websockets.__version__))
 
-            # websockets>=16.0 默认走代理，本地连接需显式禁用，但 14 才引入这个参数
-            if tuple(int(v) for v in websockets.__version__.split(".")) >= (14,):
+            # websockets>=15.0 默认读取系统代理；本地/私网连接必须显式绕过。
+            if (
+                websocket_major_version(websockets.__version__) >= 15
+                and websocket_url_is_local(url)
+            ):
                 kwargs["proxy"] = None  
             
             self.state.websocket = await websockets.connect(**kwargs)
