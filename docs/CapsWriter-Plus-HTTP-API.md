@@ -27,6 +27,15 @@ python core_api.py
 
 - Swagger UI：`http://127.0.0.1:6018/docs`
 - OpenAPI：`http://127.0.0.1:6018/openapi.json`
+
+仓库也提供不依赖桌面环境的流式上传客户端。token 只从环境变量读取，
+不会进入命令行参数或 URL：
+
+```bash
+export CAPSWRITER_TOKEN='replace-with-your-token'
+export CAPSWRITER_API_URL='http://127.0.0.1:6018'
+python -m capswriter_plus.api.client sample.wav --format json
+```
 - 存活检查：`GET /healthz`
 - 就绪检查：`GET /readyz`，需要 Bearer token
 
