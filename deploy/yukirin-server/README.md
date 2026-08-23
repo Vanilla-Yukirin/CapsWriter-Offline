@@ -36,14 +36,14 @@ owns only the HTTP wrapper and client-side hotword post-processing.
 
 The custom branch requires one global Bearer token for every WebSocket client.
 The server validates it during the HTTP Upgrade handshake, before accepting a
-WebSocket connection. Both missing configuration and tokens shorter than 32
+WebSocket connection. Both missing configuration and tokens shorter than 16
 characters fail closed before model loading.
 
 Host configuration:
 
 ```text
 ~/.config/capswriter/capswriter.env
-CAPSWRITER_TOKEN=<at-least-32-random-characters>
+CAPSWRITER_TOKEN=<at-least-16-random-characters>
 ```
 
 Create the directory with mode `0700` and the file with mode `0600`. The user
@@ -74,6 +74,13 @@ CAPSWRITER_TOKEN=<same-token-as-host>
 `config_client.py` retains `addr` and `port` as a fallback for old local
 configuration, but `CAPSWRITER_SERVER_URL` takes precedence. Tokens embedded in
 URLs are rejected.
+
+Failed handshakes are tracked per source address. The first four failures wait
+250 ms, 500 ms, 1 second and 2 seconds; later failures return HTTP 429 with
+`Retry-After`. Records expire after five minutes without another failure, and
+a successful authentication clears that source immediately. Only new
+handshakes are affected, and logs contain the source and result but never the
+token.
 
 Enabling authentication is a coordinated cutover: prepare the host and all
 clients first, then restart the host and LXC services in one maintenance

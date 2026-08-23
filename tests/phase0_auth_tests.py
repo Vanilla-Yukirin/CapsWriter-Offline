@@ -10,6 +10,7 @@ from unittest.mock import patch
 import websockets
 
 from capswriter_plus.security import (
+    AuthFailureGuard,
     MIN_TOKEN_LENGTH,
     SecurityConfigError,
     create_websocket_auth_process_request,
@@ -22,6 +23,10 @@ from capswriter_plus.security import (
 
 
 TOKEN = "a" * MIN_TOKEN_LENGTH
+
+
+async def no_sleep(_delay):
+    return None
 
 
 class FakeResponse:
@@ -48,15 +53,30 @@ class SecurityConfigTests(unittest.TestCase):
         with self.assertRaises(SecurityConfigError):
             load_required_token({})
 
-    def test_short_token_fails_closed(self):
+    def test_15_character_token_fails_closed(self):
         with self.assertRaises(SecurityConfigError):
-            load_required_token({"CAPSWRITER_TOKEN": "too-short"})
+            load_required_token({"CAPSWRITER_TOKEN": "a" * 15})
 
-    def test_valid_token_loads(self):
+    def test_16_character_token_loads(self):
         self.assertEqual(
-            load_required_token({"CAPSWRITER_TOKEN": TOKEN}),
-            TOKEN,
+            load_required_token({"CAPSWRITER_TOKEN": "a" * 16}),
+            "a" * 16,
         )
+
+    def test_failure_delays_then_returns_rate_limit(self):
+        guard = AuthFailureGuard(clock=lambda: 0.0)
+        self.assertEqual(guard.register_failure("client"), (0.25, False, None))
+        self.assertEqual(guard.register_failure("client"), (0.5, False, None))
+        self.assertEqual(guard.register_failure("client"), (1.0, False, None))
+        self.assertEqual(guard.register_failure("client"), (2.0, False, None))
+        self.assertEqual(guard.register_failure("client"), (0.0, True, 300))
+
+    def test_failure_record_decays_after_five_minutes(self):
+        now = [0.0]
+        guard = AuthFailureGuard(clock=lambda: now[0])
+        guard.register_failure("client")
+        now[0] = 300.0
+        self.assertEqual(guard.register_failure("client"), (0.25, False, None))
 
     def test_bearer_header_is_exact_and_case_insensitive(self):
         self.assertTrue(is_bearer_authorized({"authorization": f"bearer {TOKEN}"}, TOKEN))
@@ -93,27 +113,48 @@ class SecurityConfigTests(unittest.TestCase):
 
 class HandshakeTests(unittest.IsolatedAsyncioTestCase):
     async def test_websockets_16_accepts_valid_token(self):
-        callback = create_websocket_auth_process_request(TOKEN, "16.0")
+        callback = create_websocket_auth_process_request(TOKEN, "16.0", sleep=no_sleep)
         response = callback(FakeConnection(), FakeRequest({"Authorization": f"Bearer {TOKEN}"}))
         if inspect.isawaitable(response):
             response = await response
         self.assertIsNone(response)
 
     async def test_websockets_16_rejects_missing_token(self):
-        callback = create_websocket_auth_process_request(TOKEN, "16.0")
+        callback = create_websocket_auth_process_request(TOKEN, "16.0", sleep=no_sleep)
         response = callback(FakeConnection(), FakeRequest({}))
         if inspect.isawaitable(response):
             response = await response
         self.assertEqual(response.status, HTTPStatus.UNAUTHORIZED)
         self.assertEqual(response.headers["WWW-Authenticate"], "Bearer")
 
+    async def test_websockets_16_returns_429_after_four_failures(self):
+        callback = create_websocket_auth_process_request(TOKEN, "16.0", sleep=no_sleep)
+        connection = FakeConnection()
+        for _ in range(4):
+            response = await callback(connection, FakeRequest({}))
+            self.assertEqual(response.status, HTTPStatus.UNAUTHORIZED)
+        response = await callback(connection, FakeRequest({}))
+        self.assertEqual(response.status, HTTPStatus.TOO_MANY_REQUESTS)
+        self.assertEqual(response.headers["Retry-After"], "300")
+
+    async def test_success_clears_source_failure_record(self):
+        callback = create_websocket_auth_process_request(TOKEN, "16.0", sleep=no_sleep)
+        connection = FakeConnection()
+        for _ in range(4):
+            await callback(connection, FakeRequest({}))
+        self.assertIsNone(
+            await callback(connection, FakeRequest({"Authorization": f"Bearer {TOKEN}"}))
+        )
+        response = await callback(connection, FakeRequest({}))
+        self.assertEqual(response.status, HTTPStatus.UNAUTHORIZED)
+
     async def test_websockets_13_accepts_valid_token(self):
-        callback = create_websocket_auth_process_request(TOKEN, "13.1")
+        callback = create_websocket_auth_process_request(TOKEN, "13.1", sleep=no_sleep)
         response = await callback("/", {"Authorization": f"Bearer {TOKEN}"})
         self.assertIsNone(response)
 
     async def test_websockets_13_rejects_wrong_token(self):
-        callback = create_websocket_auth_process_request(TOKEN, "13.1")
+        callback = create_websocket_auth_process_request(TOKEN, "13.1", sleep=no_sleep)
         status, headers, body = await callback(
             "/asr",
             {"Authorization": f"Bearer {'b' * MIN_TOKEN_LENGTH}"},
