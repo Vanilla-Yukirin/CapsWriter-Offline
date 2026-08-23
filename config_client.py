@@ -11,7 +11,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # 客户端配置
 class ClientConfig:
-    addr = '10.51.192.1'          # Server 地址（宿主机）
+    addr = '127.0.0.1'          # Server 地址（默认本机；远端建议设置完整 URL）
     port = '6016'               # Server 端口
 
     # 优先使用完整 WebSocket URL，支持公网 wss:// 域名和路径。
