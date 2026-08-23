@@ -7,6 +7,7 @@ import tempfile
 import threading
 import time
 import unittest
+import urllib.error
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -42,6 +43,7 @@ class StubStatusCollector:
                 "connections": 1,
             },
             "webui": {"active": True, "state": "active", "pid": 125, "port": 6017, "listen": "127.0.0.1", "uptime_seconds": 10},
+            "api": {"enabled": True, "ready": True, "state": "ready", "port": 6018, "active_requests": 0},
             "device": {"mode": "gpu", "label": "GGUF decoder: GPU", "components": []},
             "log": {"available": True, "size_bytes": 10, "modified_at": None, "filename": "server_latest.log"},
         }
@@ -291,6 +293,7 @@ class GenericStatusCollectorTests(unittest.TestCase):
         self.assertEqual(overview["device"]["mode"], "unknown")
         self.assertNotIn("wrapper", overview)
         self.assertNotIn("gpu", overview)
+        self.assertFalse(overview["api"]["enabled"])
 
     def test_overview_uses_product_runtime_self_report(self):
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -333,6 +336,48 @@ class GenericStatusCollectorTests(unittest.TestCase):
                 runtime = collector._runtime_status()
 
         self.assertTrue(runtime["asr"]["ready"])
+
+    def test_optional_api_uses_shared_token_and_reports_readiness(self):
+        class FakeHTTPResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self, _limit):
+                return b'{"ready":true,"active_requests":2}'
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            collector = StatusCollector(
+                token=TOKEN,
+                instance_name="Generic Instance",
+                asr_status_url="http://127.0.0.1:6016/status",
+                asr_port=6016,
+                webui_host="127.0.0.1",
+                webui_port=6017,
+                log_path=Path(temp_dir) / "missing.log",
+                build_id="test",
+                webui_started_at=0,
+                api_enabled=True,
+                api_status_url="http://127.0.0.1:6018/readyz",
+            )
+
+            def fake_urlopen(request, timeout):
+                self.assertEqual(timeout, 1.0)
+                self.assertEqual(
+                    request.get_header("Authorization"), f"Bearer {TOKEN}"
+                )
+                if request.full_url.endswith("/status"):
+                    raise urllib.error.URLError("asr not running")
+                return FakeHTTPResponse()
+
+            with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+                overview = collector.overview()
+
+        self.assertTrue(overview["api"]["enabled"])
+        self.assertTrue(overview["api"]["ready"])
+        self.assertEqual(overview["api"]["active_requests"], 2)
 
 
 class RuntimeStatusTests(unittest.TestCase):

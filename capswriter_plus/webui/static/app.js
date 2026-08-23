@@ -86,6 +86,7 @@ function renderOverview(data) {
   const asr = data.asr || {};
   const device = data.device || {};
   const webui = data.webui || {};
+  const api = data.api || {};
   const healthy = asr.ready === true;
   const awaiting = asr.ready === null || asr.ready === undefined;
 
@@ -110,6 +111,16 @@ function renderOverview(data) {
   $("asr-service-meta").textContent = `TCP ${asr.port || 6016}${asr.main_pid ? ` · PID ${asr.main_pid}` : ""}`;
   setPill($("asr-service-pill"), healthy ? "已就绪" : (awaiting ? "未确认" : "不可用"), healthy ? "healthy" : (awaiting ? "neutral" : "danger"));
   $("webui-service-meta").textContent = `${webui.listen || "127.0.0.1"}:${webui.port || 6017} · PID ${webui.pid || "—"}`;
+  $("api-service-row").hidden = api.enabled !== true;
+  if (api.enabled === true) {
+    const apiAwaiting = api.ready === null || api.ready === undefined;
+    $("api-service-meta").textContent = `TCP ${api.port || 6018}${api.active_requests !== null && api.active_requests !== undefined ? ` · ${api.active_requests} 个活动请求` : ""}`;
+    setPill(
+      $("api-service-pill"),
+      api.ready === true ? "已就绪" : (apiAwaiting ? "未确认" : "不可用"),
+      api.ready === true ? "healthy" : (apiAwaiting ? "neutral" : "danger"),
+    );
+  }
 
   $("version-value").textContent = data.version?.capswriter || "—";
   $("build-value").textContent = `${data.version?.extension || "—"} · ${data.version?.build || "—"}`;
@@ -137,14 +148,14 @@ async function loadOverview() {
 
 function humanKey(key) {
   const names = {
-    instance: "实例", server: "服务端", model: "模型", webui: "Web UI",
+    instance: "实例", server: "服务端", model: "模型", webui: "Web UI", http_api: "HTTP API",
     features: "功能开关", security: "安全状态", listen: "监听地址", port: "端口",
     model_type: "模型类型", log_level: "日志级别", aligner_idle_timeout_seconds: "对齐器空闲释放",
     format_numbers: "数字格式化", format_spacing: "中英文空格", name: "名称", type: "类型", context_size: "上下文",
     chunk_seconds: "分段秒数", memory_segments: "记忆段数", gpu_enabled: "GPU 加速", read_only: "只读模式",
     configured_device: "配置设备", components: "执行组件", http_transcription_api: "HTTP 转录 API", hotword_editor: "热词编辑",
     model_reload: "模型重载", tts: "TTS", feedback_agent: "反馈 Agent", token_configured: "Token 已配置",
-    minimum_token_length: "Token 最短长度", token_visible: "Token 可见",
+    minimum_token_length: "Token 最短长度", token_visible: "Token 可见", enabled: "已启用", upload_mode: "上传方式",
   };
   return names[key] || key.replaceAll("_", " ");
 }

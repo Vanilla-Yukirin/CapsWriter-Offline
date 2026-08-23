@@ -27,6 +27,9 @@ class StatusCollector:
         log_path: Path,
         build_id: str,
         webui_started_at: float,
+        api_enabled: bool = False,
+        api_status_url: str = "",
+        api_port: int = 6018,
     ) -> None:
         self.token = token
         self.instance_name = instance_name
@@ -37,6 +40,9 @@ class StatusCollector:
         self.log_path = log_path
         self.build_id = build_id
         self.webui_started_at = webui_started_at
+        self.api_enabled = api_enabled
+        self.api_status_url = api_status_url
+        self.api_port = api_port
 
     def _log_info(self) -> dict[str, Any]:
         try:
@@ -87,6 +93,20 @@ class StatusCollector:
             if isinstance(runtime_device, dict):
                 device.update(runtime_device)
 
+        api = {
+            "enabled": self.api_enabled,
+            "ready": None,
+            "state": "disabled" if not self.api_enabled else "awaiting_runtime_status",
+            "port": self.api_port,
+            "active_requests": None,
+        }
+        if self.api_enabled:
+            api_runtime = self._api_runtime_status()
+            if api_runtime:
+                api["ready"] = api_runtime.get("ready") is True
+                api["state"] = "ready" if api["ready"] else "unavailable"
+                api["active_requests"] = api_runtime.get("active_requests")
+
         return {
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "instance": {"name": self.instance_name},
@@ -107,6 +127,7 @@ class StatusCollector:
                     0, int(time.monotonic() - self.webui_started_at)
                 ),
             },
+            "api": api,
             "log": self._log_info(),
         }
 
@@ -121,6 +142,31 @@ class StatusCollector:
         try:
             with urllib.request.urlopen(request, timeout=1.0) as response:
                 raw = response.read(128 * 1024 + 1)
+        except (OSError, urllib.error.URLError):
+            return None
+        if len(raw) > 128 * 1024:
+            return None
+        try:
+            payload = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, ValueError):
+            return None
+        return payload if isinstance(payload, dict) else None
+
+    def _api_runtime_status(self) -> dict[str, Any] | None:
+        request = urllib.request.Request(
+            self.api_status_url,
+            headers={
+                "Accept": "application/json",
+                "Authorization": f"Bearer {self.token}",
+            },
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=1.0) as response:
+                raw = response.read(128 * 1024 + 1)
+        except urllib.error.HTTPError as exc:
+            if exc.code != 503:
+                return None
+            raw = exc.read(128 * 1024 + 1)
         except (OSError, urllib.error.URLError):
             return None
         if len(raw) > 128 * 1024:
@@ -161,9 +207,14 @@ class StatusCollector:
                 "port": self.webui_port,
                 "read_only": True,
             },
+            "http_api": {
+                "enabled": self.api_enabled,
+                "port": self.api_port,
+                "upload_mode": "raw request body",
+            },
             "features": {
                 "webui": True,
-                "http_transcription_api": False,
+                "http_transcription_api": self.api_enabled,
                 "hotword_editor": False,
                 "model_reload": False,
                 "tts": False,

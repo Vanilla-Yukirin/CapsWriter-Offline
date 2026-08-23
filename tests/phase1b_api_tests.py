@@ -100,6 +100,8 @@ class APITestCase(unittest.TestCase):
         response = self.client.get("/readyz", headers=self.auth)
         self.assertEqual(response.status_code, 200)
         self.assertTrue(response.json()["ready"])
+        self.assertEqual(response.json()["port"], 6018)
+        self.assertEqual(response.json()["active_requests"], 0)
 
     def test_raw_upload_returns_structured_json(self):
         response = self.post(suffix="&language=chinese&context=greeting")

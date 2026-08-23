@@ -53,6 +53,9 @@ class WebUIConfig:
     instance_name: str = "CapsWriter Plus"
     asr_port: int = 6016
     asr_status_url: str = ""
+    api_enabled: bool = False
+    api_port: int = 6018
+    api_status_url: str = ""
 
     @classmethod
     def from_env(cls) -> "WebUIConfig":
@@ -60,6 +63,7 @@ class WebUIConfig:
             os.getenv("CAPSWRITER_BASE_DIR", str(Path(__file__).resolve().parents[2]))
         ).resolve()
         asr_port = int(os.getenv("CAPSWRITER_ASR_PORT", "6016"))
+        api_port = int(os.getenv("CAPSWRITER_API_PORT", "6018"))
         config = cls(
             token=load_required_token(),
             host=os.getenv("CAPSWRITER_WEBUI_HOST", "127.0.0.1").strip(),
@@ -83,6 +87,12 @@ class WebUIConfig:
             asr_status_url=os.getenv(
                 "CAPSWRITER_ASR_STATUS_URL",
                 f"http://127.0.0.1:{asr_port}/status",
+            ).strip(),
+            api_enabled=_env_bool(os.getenv("CAPSWRITER_API_ENABLED", "0")),
+            api_port=api_port,
+            api_status_url=os.getenv(
+                "CAPSWRITER_API_STATUS_URL",
+                f"http://127.0.0.1:{api_port}/readyz",
             ).strip(),
         )
         config.validate()
@@ -118,6 +128,25 @@ class WebUIConfig:
             raise ValueError("CAPSWRITER_ASR_STATUS_URL 不能包含凭据")
         if status_url.fragment:
             raise ValueError("CAPSWRITER_ASR_STATUS_URL 不能包含 fragment")
+        if not 1 <= self.api_port <= 65535:
+            raise ValueError("CAPSWRITER_API_PORT 必须在 1..65535 范围内")
+        if self.api_enabled:
+            api_status_url = urlsplit(
+                self.api_status_url
+                or f"http://127.0.0.1:{self.api_port}/readyz"
+            )
+            if (
+                api_status_url.scheme not in {"http", "https"}
+                or not api_status_url.netloc
+            ):
+                raise ValueError("CAPSWRITER_API_STATUS_URL 必须是完整的 HTTP(S) URL")
+            if (
+                api_status_url.username is not None
+                or api_status_url.password is not None
+            ):
+                raise ValueError("CAPSWRITER_API_STATUS_URL 不能包含凭据")
+            if api_status_url.fragment:
+                raise ValueError("CAPSWRITER_API_STATUS_URL 不能包含 fragment")
 
 
 class SessionStore:
@@ -238,6 +267,12 @@ class WebUIRuntime:
             log_path=config.log_path,
             build_id=config.build_id,
             webui_started_at=self.started_at,
+            api_enabled=config.api_enabled,
+            api_status_url=(
+                config.api_status_url
+                or f"http://127.0.0.1:{config.api_port}/readyz"
+            ),
+            api_port=config.api_port,
         )
 
     def authenticate_token(self, supplied: str, source: str) -> bool:

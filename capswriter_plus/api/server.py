@@ -267,6 +267,11 @@ def create_app(
     )
     async def readyz():
         status = await runtime.readiness_probe()
+        status = {
+            **status,
+            "port": config.port,
+            "active_requests": runtime.active_requests,
+        }
         return JSONResponse(
             status_code=200 if status.get("ready") is True else 503,
             content=status,
