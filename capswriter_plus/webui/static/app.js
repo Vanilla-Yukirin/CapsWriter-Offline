@@ -84,36 +84,32 @@ function setPill(element, text, kind) {
 
 function renderOverview(data) {
   const asr = data.asr || {};
-  const wrapper = data.wrapper || {};
+  const device = data.device || {};
   const webui = data.webui || {};
-  const healthy = Boolean(asr.active && asr.listening && wrapper.reachable);
+  const healthy = asr.ready === true;
+  const awaiting = asr.ready === null || asr.ready === undefined;
 
-  $("hero-title").textContent = healthy ? "语音服务运行正常" : "部分组件需要关注";
+  $("instance-name").textContent = data.instance?.name || "CapsWriter Plus";
+  $("hero-title").textContent = healthy ? "语音服务运行正常" : (awaiting ? "等待 ASR 运行时状态" : "语音服务需要关注");
   $("hero-subtitle").textContent = healthy
-    ? "ASR、Web UI 与 LXC wrapper 均可达。"
-    : "请检查下方组件状态；Web UI 本身仍保持只读可用。";
+    ? "ASR 与 Web UI 均已就绪。"
+    : (awaiting ? "Web UI 正常，尚未收到 ASR 自报告状态。" : "请检查 ASR 运行状态；Web UI 本身仍保持可用。");
   $("hero-badge").className = `status-badge ${healthy ? "healthy" : "warning"}`;
-  $("hero-badge").lastChild.textContent = healthy ? "全部正常" : "需要关注";
+  $("hero-badge").lastChild.textContent = healthy ? "运行正常" : (awaiting ? "等待状态" : "需要关注");
 
-  $("asr-state").textContent = asr.active ? "运行中" : (asr.state || "不可用");
-  $("asr-detail").textContent = `${asr.port || 6016} / ${asr.listening ? "正在监听" : "未监听"}`;
-  $("asr-indicator").classList.toggle("offline", !asr.active);
-  $("worker-state").textContent = (asr.worker_pids || []).length ? "已加载" : "未确认";
-  $("worker-detail").textContent = (asr.worker_pids || []).length
-    ? `PID ${(asr.worker_pids || []).join(", ")}` : "等待 worker 进程";
+  $("asr-state").textContent = asr.ready === true ? "已就绪" : (awaiting ? "未确认" : (asr.state || "不可用"));
+  $("asr-detail").textContent = `${asr.port || 6016} / ${asr.listening === true ? "正在监听" : (asr.listening === false ? "未监听" : "等待状态")}`;
+  $("asr-indicator").classList.toggle("offline", asr.ready === false);
+  $("worker-state").textContent = asr.worker_pid ? "已加载" : "未确认";
+  $("worker-detail").textContent = asr.worker_pid ? `PID ${asr.worker_pid}` : "等待 ASR 运行时报告";
   $("connection-count").textContent = asr.connections ?? "—";
 
-  const gpu = Array.isArray(data.gpu) && data.gpu.length ? data.gpu[0] : null;
-  $("gpu-state").textContent = gpu ? `${gpu.utilization_percent}%` : "不可用";
-  $("gpu-detail").textContent = gpu
-    ? `${gpu.name} · ${gpu.memory_used_mb}/${gpu.memory_total_mb} MB` : "未获取设备指标";
+  $("device-state").textContent = device.mode && device.mode !== "unknown" ? device.mode.toUpperCase() : "未确认";
+  $("device-detail").textContent = device.label || "等待 ASR 运行时报告";
 
-  $("asr-service-meta").textContent = `${asr.service || "capswriter-server.service"} · PID ${asr.main_pid || "—"}`;
-  setPill($("asr-service-pill"), asr.active ? "运行中" : "不可用", asr.active ? "healthy" : "danger");
+  $("asr-service-meta").textContent = `TCP ${asr.port || 6016}${asr.main_pid ? ` · PID ${asr.main_pid}` : ""}`;
+  setPill($("asr-service-pill"), healthy ? "已就绪" : (awaiting ? "未确认" : "不可用"), healthy ? "healthy" : (awaiting ? "neutral" : "danger"));
   $("webui-service-meta").textContent = `${webui.listen || "127.0.0.1"}:${webui.port || 6017} · PID ${webui.pid || "—"}`;
-  $("wrapper-service-meta").textContent = wrapper.reachable
-    ? (wrapper.connected ? "正在处理任务" : "就绪 / 当前空闲") : "健康检查不可达";
-  setPill($("wrapper-service-pill"), wrapper.reachable ? "可达" : "不可用", wrapper.reachable ? "healthy" : "danger");
 
   $("version-value").textContent = data.version?.capswriter || "—";
   $("build-value").textContent = `${data.version?.extension || "—"} · ${data.version?.build || "—"}`;
@@ -122,8 +118,8 @@ function renderOverview(data) {
   $("log-value").textContent = data.log?.available
     ? `${data.log.filename} · ${formatBytes(data.log.size_bytes)}` : "不可用";
 
-  $("sidebar-status").textContent = healthy ? "系统正常" : "部分不可用";
-  $("sidebar-status-dot").classList.toggle("offline", !healthy);
+  $("sidebar-status").textContent = healthy ? "系统正常" : (awaiting ? "等待 ASR" : "ASR 不可用");
+  $("sidebar-status-dot").classList.toggle("offline", asr.ready === false);
   $("last-updated").textContent = `更新于 ${new Date(data.generated_at).toLocaleTimeString("zh-CN", { hour12: false })}`;
 }
 
@@ -141,12 +137,12 @@ async function loadOverview() {
 
 function humanKey(key) {
   const names = {
-    server: "服务端", model: "模型", webui: "Web UI", wrapper: "LXC Wrapper",
+    instance: "实例", server: "服务端", model: "模型", webui: "Web UI",
     features: "功能开关", security: "安全状态", listen: "监听地址", port: "端口",
     model_type: "模型类型", log_level: "日志级别", aligner_idle_timeout_seconds: "对齐器空闲释放",
     format_numbers: "数字格式化", format_spacing: "中英文空格", name: "名称", context_size: "上下文",
     chunk_seconds: "分段秒数", memory_segments: "记忆段数", gpu_enabled: "GPU 加速", read_only: "只读模式",
-    public_ingress_configured: "公网入口", health_url: "健康地址", webui: "Web UI", hotword_editor: "热词编辑",
+    http_transcription_api: "HTTP 转录 API", hotword_editor: "热词编辑",
     model_reload: "模型重载", tts: "TTS", feedback_agent: "反馈 Agent", token_configured: "Token 已配置",
     minimum_token_length: "Token 最短长度", token_visible: "Token 可见",
   };

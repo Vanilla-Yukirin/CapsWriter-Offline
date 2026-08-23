@@ -1,4 +1,4 @@
-"""CapsWriter Phase 1A 本地只读 Web UI 服务。"""
+"""CapsWriter Plus 本地只读 Web UI 服务。"""
 
 from __future__ import annotations
 
@@ -47,11 +47,10 @@ class WebUIConfig:
     port: int
     base_dir: Path
     log_path: Path
-    wrapper_health_url: str
     secure_cookie: bool
     session_ttl_seconds: int
     build_id: str
-    asr_service: str = "capswriter-server.service"
+    instance_name: str = "CapsWriter Plus"
     asr_port: int = 6016
 
     @classmethod
@@ -67,7 +66,6 @@ class WebUIConfig:
             log_path=Path(
                 os.getenv("CAPSWRITER_LOG_PATH", str(base_dir / "logs" / "server_latest.log"))
             ).resolve(),
-            wrapper_health_url=os.getenv("CAPSWRITER_WRAPPER_HEALTH_URL", "").strip(),
             secure_cookie=_env_bool(
                 os.getenv("CAPSWRITER_WEBUI_SECURE_COOKIE", "0")
             ),
@@ -76,6 +74,10 @@ class WebUIConfig:
             ),
             build_id=os.getenv("CAPSWRITER_BUILD_ID", "development").strip()
             or "development",
+            instance_name=os.getenv(
+                "CAPSWRITER_INSTANCE_NAME", "CapsWriter Plus"
+            ).strip(),
+            asr_port=int(os.getenv("CAPSWRITER_ASR_PORT", "6016")),
         )
         config.validate()
         return config
@@ -87,13 +89,19 @@ class WebUIConfig:
         try:
             address = ipaddress.ip_address(self.host)
         except ValueError as exc:
-            raise ValueError("Phase 1A Web UI 必须使用回环 IP 地址") from exc
+            raise ValueError("Web UI 必须使用回环 IP 地址") from exc
         if not address.is_loopback:
-            raise ValueError("Phase 1A Web UI 只允许监听回环地址")
+            raise ValueError("Web UI 只允许监听回环地址")
         if not 1 <= self.port <= 65535:
             raise ValueError("CAPSWRITER_WEBUI_PORT 必须在 1..65535 范围内")
         if not 300 <= self.session_ttl_seconds <= 86400:
             raise ValueError("Web UI 会话有效期必须在 5 分钟到 24 小时之间")
+        if not self.instance_name or len(self.instance_name) > 80:
+            raise ValueError("CAPSWRITER_INSTANCE_NAME 必须为 1..80 个字符")
+        if any(ord(char) < 32 for char in self.instance_name):
+            raise ValueError("CAPSWRITER_INSTANCE_NAME 不能包含控制字符")
+        if not 1 <= self.asr_port <= 65535:
+            raise ValueError("CAPSWRITER_ASR_PORT 必须在 1..65535 范围内")
 
 
 class SessionStore:
@@ -202,10 +210,10 @@ class WebUIRuntime:
         self.sleep = sleep
         self.static_dir = Path(__file__).resolve().parent / "static"
         self.status_collector = status_collector or StatusCollector(
-            asr_service=config.asr_service,
+            instance_name=config.instance_name,
             asr_port=config.asr_port,
+            webui_host=config.host,
             webui_port=config.port,
-            wrapper_health_url=config.wrapper_health_url,
             log_path=config.log_path,
             build_id=config.build_id,
             webui_started_at=self.started_at,

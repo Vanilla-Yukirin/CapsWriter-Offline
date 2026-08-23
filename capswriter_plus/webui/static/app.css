@@ -155,7 +155,6 @@ button { color: inherit; }
 .service-icon { display: grid; place-items: center; width: 35px; height: 35px; border-radius: 10px; font-size: .72rem; font-weight: 800; }
 .service-icon.asr { color: var(--cyan); background: var(--cyan-soft); }
 .service-icon.web { color: var(--blue); background: rgba(123, 167, 255, .1); }
-.service-icon.lxc { color: var(--amber); background: rgba(247, 186, 99, .1); }
 .pill { padding: .36rem .58rem; font-size: .67rem; }
 .detail-list { margin: 0; }
 .detail-list div { display: flex; justify-content: space-between; gap: 1rem; padding: .78rem 0; border-top: 1px solid var(--line); }

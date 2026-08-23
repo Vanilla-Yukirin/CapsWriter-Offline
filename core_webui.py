@@ -1,5 +1,5 @@
 # coding: utf-8
-"""CapsWriter Phase 1A Web UI 启动入口。"""
+"""CapsWriter Plus Web UI 启动入口。"""
 
 from capswriter_plus.security import SecurityConfigError
 from capswriter_plus.webui import run

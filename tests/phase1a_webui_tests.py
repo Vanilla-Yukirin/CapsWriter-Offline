@@ -6,10 +6,12 @@ import json
 import tempfile
 import threading
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 from capswriter_plus.security import AuthFailureGuard, SecurityConfigError
 from capswriter_plus.webui.server import WebUIConfig, create_server, read_log_chunk
+from capswriter_plus.webui.status import StatusCollector
 
 
 TOKEN = "phase1a-test-token-123456"
@@ -19,25 +21,21 @@ class StubStatusCollector:
     def overview(self):
         return {
             "generated_at": "2026-08-23T09:00:00+00:00",
-            "version": {"capswriter": "2.6", "extension": "Phase 1A", "build": "test"},
+            "instance": {"name": "Test Instance"},
+            "version": {"capswriter": "2.6", "extension": "CapsWriter Plus Web UI", "build": "test"},
             "asr": {
-                "service": "capswriter-server.service",
                 "active": True,
+                "ready": True,
                 "state": "active",
-                "sub_state": "running",
-                "result": "success",
                 "main_pid": 123,
-                "worker_pids": [124],
-                "started_at": "today",
+                "worker_pid": 124,
                 "uptime_seconds": 60,
-                "restart_count": 0,
                 "port": 6016,
                 "listening": True,
                 "connections": 1,
             },
             "webui": {"active": True, "state": "active", "pid": 125, "port": 6017, "listen": "127.0.0.1", "uptime_seconds": 10},
-            "wrapper": {"reachable": True, "status": "ok", "connected": False},
-            "gpu": [],
+            "device": {"mode": "gpu", "label": "GGUF decoder: GPU", "components": []},
             "log": {"available": True, "size_bytes": 10, "modified_at": None, "filename": "server_latest.log"},
         }
 
@@ -59,10 +57,10 @@ class WebUITestCase(unittest.TestCase):
             port=6017,
             base_dir=Path(self.temp_dir.name),
             log_path=self.log_path,
-            wrapper_health_url="http://127.0.0.1:9600/health",
             secure_cookie=False,
             session_ttl_seconds=3600,
             build_id="test",
+            instance_name="Test Instance",
         )
         self.server = create_server(
             self.config,
@@ -112,9 +110,11 @@ class WebUITestCase(unittest.TestCase):
         status, _, body = self.request("GET", "/")
         self.assertEqual(status, 200)
         html = body.decode("utf-8")
-        self.assertIn("CapsWriter Online", html)
+        self.assertIn("CapsWriter Plus", html)
         self.assertIn('src="/assets/app.js"', html)
         self.assertNotIn("<script>", html)
+        self.assertNotIn("YUKIRIN", html)
+        self.assertNotIn("LXC", html)
         self.assertEqual(self.request("GET", "/assets/app.css")[0], 200)
         self.assertEqual(self.request("GET", "/assets/app.js")[0], 200)
 
@@ -239,10 +239,10 @@ class WebUIConfigTests(unittest.TestCase):
             port=6017,
             base_dir=Path.cwd(),
             log_path=Path.cwd() / "logs" / "server_latest.log",
-            wrapper_health_url="http://127.0.0.1:9600/health",
             secure_cookie=False,
             session_ttl_seconds=3600,
             build_id="test",
+            instance_name="Test Instance",
         )
 
     def test_non_loopback_listener_is_rejected(self):
@@ -252,6 +252,31 @@ class WebUIConfigTests(unittest.TestCase):
     def test_short_token_is_rejected(self):
         with self.assertRaises(SecurityConfigError):
             self.make_config(token="a" * 15).validate()
+
+    def test_instance_name_is_bounded(self):
+        with self.assertRaises(ValueError):
+            replace(self.make_config(), instance_name="").validate()
+
+
+class GenericStatusCollectorTests(unittest.TestCase):
+    def test_overview_has_no_deployment_specific_dependencies(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            collector = StatusCollector(
+                instance_name="Generic Instance",
+                asr_port=6016,
+                webui_host="127.0.0.1",
+                webui_port=6017,
+                log_path=Path(temp_dir) / "missing.log",
+                build_id="test",
+                webui_started_at=0,
+            )
+            overview = collector.overview()
+
+        self.assertEqual(overview["instance"]["name"], "Generic Instance")
+        self.assertIsNone(overview["asr"]["ready"])
+        self.assertEqual(overview["device"]["mode"], "unknown")
+        self.assertNotIn("wrapper", overview)
+        self.assertNotIn("gpu", overview)
 
 
 if __name__ == "__main__":
