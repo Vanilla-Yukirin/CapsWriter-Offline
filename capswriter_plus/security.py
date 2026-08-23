@@ -252,6 +252,10 @@ def create_websocket_auth_process_request(
                 if is_status_request(getattr(request, "path", "/")):
                     status, body = status_response()
                     response = connection.respond(status, body)
+                    try:
+                        del response.headers["Content-Type"]
+                    except KeyError:
+                        pass
                     response.headers["Content-Type"] = "application/json; charset=utf-8"
                     response.headers["Cache-Control"] = "no-store"
                     return response

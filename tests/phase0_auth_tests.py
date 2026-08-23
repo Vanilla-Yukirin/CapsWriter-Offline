@@ -36,7 +36,7 @@ class FakeResponse:
     def __init__(self, status, text):
         self.status = status
         self.text = text
-        self.headers = {}
+        self.headers = {"Content-Type": "text/plain; charset=utf-8"}
 
 
 class FakeConnection:
