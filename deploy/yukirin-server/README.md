@@ -87,6 +87,56 @@ clients first, then restart the host and LXC services in one maintenance
 window. Verify missing, incorrect and correct credentials separately. Do not
 expose a token over public `ws://`; use HTTPS/WSS at the public endpoint.
 
+## Phase 1A local Web UI
+
+`capswriter-webui.service` is a separate standard-library HTTP process. It
+listens only on `127.0.0.1:6017`; the application rejects non-loopback bind
+addresses at startup. Starting, stopping or restarting this unit does not
+restart the ASR worker on port 6016.
+
+The MVP provides:
+
+- token login with an in-memory, 12-hour session cookie;
+- ASR, worker, Web UI, wrapper and GPU status;
+- incremental read-only viewing of the fixed `server_latest.log` path;
+- an allowlisted read-only configuration page;
+- a minimal unauthenticated `/health` endpoint.
+
+All operational APIs require the same global token, either as a Bearer token or
+through the login session. Invalid form logins and invalid Bearer credentials
+use the same per-source delay and 429 protection as Phase 0. Session identifiers
+are kept as SHA-256 digests in memory, and a service restart invalidates them.
+The Web UI never returns the global token.
+
+Optional, non-secret runtime metadata belongs in:
+
+```text
+~/.config/capswriter/webui.env
+```
+
+Start from `config/webui.env.example`. Keep this local file out of Git even
+though it should contain only deployment metadata. The token remains solely in
+the required `capswriter.env`. Phase 1A uses a non-`Secure` cookie because the
+only supported access is loopback HTTP or an SSH tunnel; a future HTTPS ingress
+must set `CAPSWRITER_WEBUI_SECURE_COOKIE=1`.
+
+After installing the user unit, enable it independently:
+
+```text
+systemctl --user daemon-reload
+systemctl --user enable --now capswriter-webui.service
+```
+
+To access it without configuring public ingress:
+
+```text
+ssh -L 16017:127.0.0.1:6017 yukirin-server
+```
+
+Then open `http://127.0.0.1:16017/` and enter the existing global token. This
+phase intentionally does not change FRP, Puck, certificates, public listeners,
+hotwords, model lifecycle or TTS.
+
 ## Tracked customizations
 
 Files at repository root mirror the deployed source changes:
@@ -99,6 +149,8 @@ Files at repository root mirror the deployed source changes:
 Deployment artifacts:
 
 - `systemd/user/capswriter-server.service`: host user service.
+- `systemd/user/capswriter-webui.service`: loopback-only read-only Web UI.
+- `config/webui.env.example`: optional, non-secret Web UI runtime metadata.
 - `scripts/caps-transcribe`: host-facing HTTP self-client.
 - `lxc/agents/caps-client/server.py`: full CapsWriter HTTP wrapper.
 - `lxc/agents/caps_client.py`: legacy direct WebSocket CLI.

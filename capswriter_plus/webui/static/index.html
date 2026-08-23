@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>CapsWriter Online</title>
+  <link rel="stylesheet" href="/assets/app.css">
+</head>
+<body>
+  <div class="ambient ambient-one"></div>
+  <div class="ambient ambient-two"></div>
+
+  <main id="login-view" class="login-shell" aria-labelledby="login-title">
+    <section class="login-card">
+      <div class="brand-mark" aria-hidden="true"><span>C</span><span>W</span></div>
+      <p class="eyebrow">PRIVATE CONTROL PLANE</p>
+      <h1 id="login-title">CapsWriter Online</h1>
+      <p class="login-copy">连接到你的本地语音推理服务。输入全局访问密钥以继续。</p>
+      <form id="login-form" novalidate>
+        <label for="token">访问密钥</label>
+        <div class="input-wrap">
+          <input id="token" name="token" type="password" minlength="16" autocomplete="current-password" required autofocus>
+          <button id="toggle-token" class="icon-button" type="button" aria-label="显示密钥">显示</button>
+        </div>
+        <p id="login-error" class="form-error" role="alert" aria-live="polite"></p>
+        <button id="login-button" class="primary-button" type="submit">
+          <span>进入控制台</span><span aria-hidden="true">→</span>
+        </button>
+      </form>
+      <div class="local-note"><span class="pulse-dot"></span>Phase 1A · 仅限本机访问</div>
+    </section>
+  </main>
+
+  <div id="dashboard-view" class="app-shell" hidden>
+    <aside class="sidebar">
+      <div class="sidebar-brand">
+        <div class="brand-mark small" aria-hidden="true"><span>C</span><span>W</span></div>
+        <div><strong>CapsWriter</strong><small>ONLINE</small></div>
+      </div>
+      <nav aria-label="控制台导航">
+        <button class="nav-item active" data-tab="overview" type="button"><span>◫</span>概览</button>
+        <button class="nav-item" data-tab="logs" type="button"><span>≡</span>日志</button>
+        <button class="nav-item" data-tab="config" type="button"><span>⌘</span>配置</button>
+      </nav>
+      <div class="sidebar-footer">
+        <div class="environment"><span class="status-dot" id="sidebar-status-dot"></span><span id="sidebar-status">正在检查</span></div>
+        <button id="logout-button" class="ghost-button" type="button">退出登录</button>
+      </div>
+    </aside>
+
+    <section class="workspace">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">YUKIRIN SERVER</p>
+          <h1 id="page-title">运行概览</h1>
+        </div>
+        <div class="topbar-meta">
+          <span id="last-updated">等待首次刷新</span>
+          <button id="refresh-button" class="icon-button refresh-button" type="button" aria-label="立即刷新">↻</button>
+        </div>
+      </header>
+
+      <section id="tab-overview" class="tab-panel active" aria-labelledby="page-title">
+        <div class="hero-status">
+          <div>
+            <p class="eyebrow">SYSTEM STATUS</p>
+            <h2 id="hero-title">正在读取服务状态</h2>
+            <p id="hero-subtitle">Web UI 已连接，等待 ASR 状态。</p>
+          </div>
+          <div id="hero-badge" class="status-badge neutral"><span></span>检查中</div>
+        </div>
+
+        <div class="metric-grid">
+          <article class="metric-card">
+            <div class="metric-heading"><span>ASR 服务</span><span id="asr-indicator" class="status-dot"></span></div>
+            <strong id="asr-state">—</strong>
+            <small id="asr-detail">6016 / 等待状态</small>
+          </article>
+          <article class="metric-card">
+            <div class="metric-heading"><span>模型 Worker</span><span class="metric-icon">◇</span></div>
+            <strong id="worker-state">—</strong>
+            <small id="worker-detail">等待进程信息</small>
+          </article>
+          <article class="metric-card">
+            <div class="metric-heading"><span>活动连接</span><span class="metric-icon">⌁</span></div>
+            <strong id="connection-count">—</strong>
+            <small>当前 WebSocket 会话</small>
+          </article>
+          <article class="metric-card">
+            <div class="metric-heading"><span>GPU</span><span class="metric-icon">◈</span></div>
+            <strong id="gpu-state">—</strong>
+            <small id="gpu-detail">等待设备信息</small>
+          </article>
+        </div>
+
+        <div class="overview-grid">
+          <article class="panel">
+            <div class="panel-header"><div><p class="eyebrow">SERVICES</p><h3>运行组件</h3></div></div>
+            <div class="service-list">
+              <div class="service-row">
+                <span class="service-icon asr">A</span>
+                <div><strong>ASR 推理服务</strong><small id="asr-service-meta">capswriter-server.service</small></div>
+                <span id="asr-service-pill" class="pill neutral">检查中</span>
+              </div>
+              <div class="service-row">
+                <span class="service-icon web">W</span>
+                <div><strong>Web 管理界面</strong><small id="webui-service-meta">127.0.0.1:6017</small></div>
+                <span class="pill healthy">运行中</span>
+              </div>
+              <div class="service-row">
+                <span class="service-icon lxc">L</span>
+                <div><strong>LXC 文件转录</strong><small id="wrapper-service-meta">按任务连接 ASR</small></div>
+                <span id="wrapper-service-pill" class="pill neutral">检查中</span>
+              </div>
+            </div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-header"><div><p class="eyebrow">RUNTIME</p><h3>运行详情</h3></div></div>
+            <dl class="detail-list">
+              <div><dt>CapsWriter 版本</dt><dd id="version-value">—</dd></div>
+              <div><dt>二开版本</dt><dd id="build-value">—</dd></div>
+              <div><dt>服务运行时间</dt><dd id="uptime-value">—</dd></div>
+              <div><dt>ASR 主进程</dt><dd id="pid-value">—</dd></div>
+              <div><dt>日志文件</dt><dd id="log-value">—</dd></div>
+            </dl>
+          </article>
+        </div>
+      </section>
+
+      <section id="tab-logs" class="tab-panel" hidden>
+        <article class="panel log-panel">
+          <div class="panel-header log-toolbar">
+            <div><p class="eyebrow">LIVE LOG</p><h3>服务端日志</h3></div>
+            <div class="toolbar-actions">
+              <label class="search-box"><span>⌕</span><input id="log-search" type="search" placeholder="筛选日志" aria-label="筛选日志"></label>
+              <button id="pause-logs" class="ghost-button" type="button">暂停</button>
+            </div>
+          </div>
+          <div class="filter-row" role="group" aria-label="日志级别">
+            <button class="filter-chip active" data-level="all" type="button">全部</button>
+            <button class="filter-chip" data-level="info" type="button">INFO</button>
+            <button class="filter-chip" data-level="warning" type="button">WARNING</button>
+            <button class="filter-chip" data-level="error" type="button">ERROR</button>
+            <span id="log-count" class="log-count">0 行</span>
+          </div>
+          <div id="log-output" class="log-output" tabindex="0" aria-live="polite"></div>
+        </article>
+      </section>
+
+      <section id="tab-config" class="tab-panel" hidden>
+        <div class="read-only-banner"><span>i</span><div><strong>只读配置</strong><p>Phase 1A 不提供在线修改、模型重载或密钥查看。修改配置后需按运维流程重启相应服务。</p></div></div>
+        <div id="config-grid" class="config-grid" aria-live="polite"></div>
+      </section>
+    </section>
+  </div>
+
+  <noscript>此控制台需要启用 JavaScript。</noscript>
+  <script src="/assets/app.js" defer></script>
+</body>
+</html>
