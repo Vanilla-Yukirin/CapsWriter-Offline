@@ -52,12 +52,14 @@ class WebUIConfig:
     build_id: str
     instance_name: str = "CapsWriter Plus"
     asr_port: int = 6016
+    asr_status_url: str = ""
 
     @classmethod
     def from_env(cls) -> "WebUIConfig":
         base_dir = Path(
             os.getenv("CAPSWRITER_BASE_DIR", str(Path(__file__).resolve().parents[2]))
         ).resolve()
+        asr_port = int(os.getenv("CAPSWRITER_ASR_PORT", "6016"))
         config = cls(
             token=load_required_token(),
             host=os.getenv("CAPSWRITER_WEBUI_HOST", "127.0.0.1").strip(),
@@ -77,7 +79,11 @@ class WebUIConfig:
             instance_name=os.getenv(
                 "CAPSWRITER_INSTANCE_NAME", "CapsWriter Plus"
             ).strip(),
-            asr_port=int(os.getenv("CAPSWRITER_ASR_PORT", "6016")),
+            asr_port=asr_port,
+            asr_status_url=os.getenv(
+                "CAPSWRITER_ASR_STATUS_URL",
+                f"http://127.0.0.1:{asr_port}/status",
+            ).strip(),
         )
         config.validate()
         return config
@@ -102,6 +108,16 @@ class WebUIConfig:
             raise ValueError("CAPSWRITER_INSTANCE_NAME 不能包含控制字符")
         if not 1 <= self.asr_port <= 65535:
             raise ValueError("CAPSWRITER_ASR_PORT 必须在 1..65535 范围内")
+        status_url = urlsplit(
+            self.asr_status_url
+            or f"http://127.0.0.1:{self.asr_port}/status"
+        )
+        if status_url.scheme not in {"http", "https"} or not status_url.netloc:
+            raise ValueError("CAPSWRITER_ASR_STATUS_URL 必须是完整的 HTTP(S) URL")
+        if status_url.username is not None or status_url.password is not None:
+            raise ValueError("CAPSWRITER_ASR_STATUS_URL 不能包含凭据")
+        if status_url.fragment:
+            raise ValueError("CAPSWRITER_ASR_STATUS_URL 不能包含 fragment")
 
 
 class SessionStore:
@@ -210,7 +226,12 @@ class WebUIRuntime:
         self.sleep = sleep
         self.static_dir = Path(__file__).resolve().parent / "static"
         self.status_collector = status_collector or StatusCollector(
+            token=config.token,
             instance_name=config.instance_name,
+            asr_status_url=(
+                config.asr_status_url
+                or f"http://127.0.0.1:{config.asr_port}/status"
+            ),
             asr_port=config.asr_port,
             webui_host=config.host,
             webui_port=config.port,

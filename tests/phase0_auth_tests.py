@@ -1,8 +1,11 @@
 # coding: utf-8
 from __future__ import annotations
 
+import asyncio
 import inspect
+import json
 import os
+import urllib.request
 import unittest
 from http import HTTPStatus
 from unittest.mock import patch
@@ -44,8 +47,9 @@ class FakeConnection:
 
 
 class FakeRequest:
-    def __init__(self, headers):
+    def __init__(self, headers, path="/"):
         self.headers = headers
+        self.path = path
 
 
 class SecurityConfigTests(unittest.TestCase):
@@ -148,6 +152,26 @@ class HandshakeTests(unittest.IsolatedAsyncioTestCase):
         response = await callback(connection, FakeRequest({}))
         self.assertEqual(response.status, HTTPStatus.UNAUTHORIZED)
 
+    async def test_websockets_16_serves_authenticated_runtime_status(self):
+        callback = create_websocket_auth_process_request(
+            TOKEN,
+            "16.0",
+            sleep=no_sleep,
+            status_provider=lambda: {"asr": {"ready": True}},
+        )
+        response = await callback(
+            FakeConnection(),
+            FakeRequest(
+                {"Authorization": f"Bearer {TOKEN}"},
+                path="/status?source=webui",
+            ),
+        )
+        self.assertEqual(response.status, HTTPStatus.OK)
+        self.assertTrue(json.loads(response.text)["asr"]["ready"])
+        self.assertEqual(
+            response.headers["Content-Type"], "application/json; charset=utf-8"
+        )
+
     async def test_websockets_13_accepts_valid_token(self):
         callback = create_websocket_auth_process_request(TOKEN, "13.1", sleep=no_sleep)
         response = await callback("/", {"Authorization": f"Bearer {TOKEN}"})
@@ -162,6 +186,23 @@ class HandshakeTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(status, HTTPStatus.UNAUTHORIZED)
         self.assertIn(("WWW-Authenticate", "Bearer"), headers)
         self.assertEqual(body, b"Unauthorized\n")
+
+    async def test_websockets_13_serves_authenticated_runtime_status(self):
+        callback = create_websocket_auth_process_request(
+            TOKEN,
+            "13.1",
+            sleep=no_sleep,
+            status_provider=lambda: {"device": {"mode": "cpu"}},
+        )
+        status, headers, body = await callback(
+            "/status",
+            {"Authorization": f"Bearer {TOKEN}"},
+        )
+        self.assertEqual(status, HTTPStatus.OK)
+        self.assertIn(
+            ("Content-Type", "application/json; charset=utf-8"), headers
+        )
+        self.assertEqual(json.loads(body)["device"]["mode"], "cpu")
 
 
 class SocketManagerConfigTests(unittest.TestCase):
@@ -185,7 +226,11 @@ class LiveWebSocketHandshakeTests(unittest.IsolatedAsyncioTestCase):
         async def handler(websocket):
             await websocket.send("authorized")
 
-        callback = create_websocket_auth_process_request(TOKEN, websockets.__version__)
+        callback = create_websocket_auth_process_request(
+            TOKEN,
+            websockets.__version__,
+            status_provider=lambda: {"asr": {"ready": True}},
+        )
         self.server = await websockets.serve(
             handler,
             "127.0.0.1",
@@ -207,6 +252,20 @@ class LiveWebSocketHandshakeTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(Exception):
             async with websockets.connect(f"ws://127.0.0.1:{self.port}"):
                 self.fail("未鉴权连接不应建立成功")
+
+    async def test_installed_websockets_serves_http_runtime_status(self):
+        def fetch_status():
+            request = urllib.request.Request(
+                f"http://127.0.0.1:{self.port}/status",
+                headers={"Authorization": f"Bearer {TOKEN}"},
+            )
+            with urllib.request.urlopen(request, timeout=3) as response:
+                return response.status, response.headers, response.read()
+
+        status, headers, body = await asyncio.to_thread(fetch_status)
+        self.assertEqual(status, HTTPStatus.OK)
+        self.assertEqual(headers.get_content_type(), "application/json")
+        self.assertTrue(json.loads(body)["asr"]["ready"])
 
 
 if __name__ == "__main__":

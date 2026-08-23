@@ -9,6 +9,7 @@ CapsWriter Offline 服务端主程序门面类 (Facade)
 
 import os
 import asyncio
+import time
 from pathlib import Path
 from config_server import ServerConfig as Config, __version__
 from .state import ServerState, console
@@ -43,6 +44,13 @@ class CapsWriterServer:
 
         self.version = __version__
         self.is_alive = False
+        self.started_at = time.monotonic()
+
+    def runtime_status(self):
+        """Return the status served from the authenticated 6016 HTTP endpoint."""
+        from capswriter_plus.runtime_status import build_server_runtime_status
+
+        return build_server_runtime_status(self)
 
 
     def _print_banner(self):

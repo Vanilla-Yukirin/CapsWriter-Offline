@@ -5,13 +5,20 @@ import http.client
 import json
 import tempfile
 import threading
+import time
 import unittest
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from capswriter_plus.security import AuthFailureGuard, SecurityConfigError
 from capswriter_plus.webui.server import WebUIConfig, create_server, read_log_chunk
 from capswriter_plus.webui.status import StatusCollector
+from capswriter_plus.runtime_status import (
+    build_server_runtime_status,
+    describe_configured_device,
+)
 
 
 TOKEN = "phase1a-test-token-123456"
@@ -259,24 +266,110 @@ class WebUIConfigTests(unittest.TestCase):
 
 
 class GenericStatusCollectorTests(unittest.TestCase):
+    @staticmethod
+    def make_collector(temp_dir):
+        return StatusCollector(
+            token=TOKEN,
+            instance_name="Generic Instance",
+            asr_status_url="http://127.0.0.1:6016/status",
+            asr_port=6016,
+            webui_host="127.0.0.1",
+            webui_port=6017,
+            log_path=Path(temp_dir) / "missing.log",
+            build_id="test",
+            webui_started_at=0,
+        )
+
     def test_overview_has_no_deployment_specific_dependencies(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            collector = StatusCollector(
-                instance_name="Generic Instance",
-                asr_port=6016,
-                webui_host="127.0.0.1",
-                webui_port=6017,
-                log_path=Path(temp_dir) / "missing.log",
-                build_id="test",
-                webui_started_at=0,
-            )
-            overview = collector.overview()
+            collector = self.make_collector(temp_dir)
+            with patch.object(collector, "_runtime_status", return_value=None):
+                overview = collector.overview()
 
         self.assertEqual(overview["instance"]["name"], "Generic Instance")
         self.assertIsNone(overview["asr"]["ready"])
         self.assertEqual(overview["device"]["mode"], "unknown")
         self.assertNotIn("wrapper", overview)
         self.assertNotIn("gpu", overview)
+
+    def test_overview_uses_product_runtime_self_report(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            collector = self.make_collector(temp_dir)
+            runtime = {
+                "asr": {"ready": True, "worker_pid": 42, "connections": 2},
+                "device": {"mode": "gpu", "label": "decoder GPU"},
+            }
+            with patch.object(
+                collector, "_runtime_status", return_value=runtime
+            ):
+                overview = collector.overview()
+
+        self.assertTrue(overview["asr"]["ready"])
+        self.assertEqual(overview["asr"]["worker_pid"], 42)
+        self.assertEqual(overview["device"]["mode"], "gpu")
+
+    def test_runtime_request_uses_the_shared_bearer_token(self):
+        class FakeHTTPResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def read(self, _limit):
+                return b'{"asr":{"ready":true}}'
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            collector = self.make_collector(temp_dir)
+
+            def fake_urlopen(request, timeout):
+                self.assertEqual(timeout, 1.0)
+                self.assertEqual(
+                    request.get_header("Authorization"), f"Bearer {TOKEN}"
+                )
+                return FakeHTTPResponse()
+
+            with patch("urllib.request.urlopen", side_effect=fake_urlopen):
+                runtime = collector._runtime_status()
+
+        self.assertTrue(runtime["asr"]["ready"])
+
+
+class RuntimeStatusTests(unittest.TestCase):
+    def test_qwen_device_profile_follows_engine_configuration(self):
+        from config_server import Qwen3ASRGGUFArgs
+
+        with (
+            patch.object(Qwen3ASRGGUFArgs, "onnx_provider", "CPU"),
+            patch.object(Qwen3ASRGGUFArgs, "llm_use_gpu", True),
+        ):
+            profile = describe_configured_device("qwen_asr")
+        self.assertEqual(profile["mode"], "gpu")
+        self.assertEqual(
+            [item["device"] for item in profile["components"]],
+            ["cpu", "gpu"],
+        )
+
+        with (
+            patch.object(Qwen3ASRGGUFArgs, "onnx_provider", "CPU"),
+            patch.object(Qwen3ASRGGUFArgs, "llm_use_gpu", False),
+        ):
+            profile = describe_configured_device("qwen_asr")
+        self.assertEqual(profile["mode"], "cpu")
+
+    def test_server_snapshot_is_ready_only_after_model_and_listener(self):
+        worker = SimpleNamespace(pid=42, is_alive=lambda: True)
+        app = SimpleNamespace(
+            process_manager=SimpleNamespace(models_ready=True, process=worker),
+            socket_manager=SimpleNamespace(is_running=True),
+            state=SimpleNamespace(sockets_id=["one", "two"]),
+            is_alive=True,
+            started_at=time.monotonic() - 5,
+        )
+        snapshot = build_server_runtime_status(app)
+        self.assertTrue(snapshot["asr"]["ready"])
+        self.assertEqual(snapshot["asr"]["worker_pid"], 42)
+        self.assertEqual(snapshot["asr"]["connections"], 2)
 
 
 if __name__ == "__main__":

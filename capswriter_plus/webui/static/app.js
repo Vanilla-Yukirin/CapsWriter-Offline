@@ -140,9 +140,9 @@ function humanKey(key) {
     instance: "实例", server: "服务端", model: "模型", webui: "Web UI",
     features: "功能开关", security: "安全状态", listen: "监听地址", port: "端口",
     model_type: "模型类型", log_level: "日志级别", aligner_idle_timeout_seconds: "对齐器空闲释放",
-    format_numbers: "数字格式化", format_spacing: "中英文空格", name: "名称", context_size: "上下文",
+    format_numbers: "数字格式化", format_spacing: "中英文空格", name: "名称", type: "类型", context_size: "上下文",
     chunk_seconds: "分段秒数", memory_segments: "记忆段数", gpu_enabled: "GPU 加速", read_only: "只读模式",
-    http_transcription_api: "HTTP 转录 API", hotword_editor: "热词编辑",
+    configured_device: "配置设备", components: "执行组件", http_transcription_api: "HTTP 转录 API", hotword_editor: "热词编辑",
     model_reload: "模型重载", tts: "TTS", feedback_agent: "反馈 Agent", token_configured: "Token 已配置",
     minimum_token_length: "Token 最短长度", token_visible: "Token 可见",
   };

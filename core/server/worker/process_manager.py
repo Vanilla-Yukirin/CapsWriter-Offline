@@ -28,6 +28,12 @@ class ProcessManager:
         self._process = None
         self.app = app
         self.is_alive = False
+        self.models_ready = False
+
+    @property
+    def process(self):
+        """Expose the worker handle for product-owned runtime reporting."""
+        return self._process
 
     def start(self):
         """
@@ -39,6 +45,7 @@ class ProcessManager:
         # 防连续触发
         if self.is_alive: return
         self.is_alive = True
+        self.models_ready = False
 
         # 1. 前置检查
         check_model()
@@ -81,13 +88,14 @@ class ProcessManager:
                 status = self.app.state.queue_out.get(timeout=0.1)
                 if status is True:
                     # 收到 True 说明模型加载成功
+                    self.models_ready = True
                     break
             except (queue.Empty, OSError):
                 if self._process and not self._process.is_alive():
                     self._handle_unexpected_exit()
                     return
                 continue
-            
+
         if not self.is_alive: return
         logger.info("模型加载完成，ASR 服务就绪")
         console.rule('[green3]开始服务')
@@ -95,6 +103,7 @@ class ProcessManager:
 
     def _handle_unexpected_exit(self):
         """处理子进程加载模型时的意外退出"""
+        self.models_ready = False
         exit_code = self._process.exitcode
         if exit_code != 0:
             logger.error(f"识别子进程意外退出! ExitCode: {exit_code}")
@@ -109,6 +118,7 @@ class ProcessManager:
         # 防连续触发
         if not self.is_alive: return
         self.is_alive = False
+        self.models_ready = False
 
         if self._process and self._process.is_alive():
             logger.info(f"正在终止识别子进程 (PID: {self._process.pid})...")
@@ -121,4 +131,3 @@ class ProcessManager:
             if self._process.is_alive():
                 logger.debug("子进程未响应优雅退出，执行强制终止")
                 self._process.terminate()
-            

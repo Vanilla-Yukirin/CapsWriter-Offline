@@ -6,6 +6,7 @@ from __future__ import annotations
 import asyncio
 import hmac
 import ipaddress
+import json
 import math
 import os
 import re
@@ -209,8 +210,10 @@ def create_websocket_auth_process_request(
     *,
     failure_guard: Optional[AuthFailureGuard] = None,
     sleep: Optional[Callable[[float], Any]] = None,
+    status_provider: Optional[Callable[[], Mapping[str, Any]]] = None,
+    status_path: str = "/status",
 ):
-    """创建兼容 websockets 13 legacy 与 14+ asyncio API 的握手鉴权器。"""
+    """创建兼容 websockets 13 legacy 与 14+ asyncio API 的鉴权入口。"""
     token = validate_token(expected_token)
     major = websocket_major_version(websockets_version)
     guard = failure_guard or AuthFailureGuard()
@@ -219,6 +222,19 @@ def create_websocket_auth_process_request(
     def warn(message: str) -> None:
         if log_warning:
             log_warning(message)
+
+    def status_response() -> tuple[HTTPStatus, str]:
+        try:
+            payload = dict(status_provider()) if status_provider else {}
+            return HTTPStatus.OK, json.dumps(
+                payload, ensure_ascii=False, separators=(",", ":")
+            ) + "\n"
+        except Exception:
+            warn("ASR 运行状态生成失败，结果: 503")
+            return HTTPStatus.SERVICE_UNAVAILABLE, '{"status":"unavailable"}\n'
+
+    def is_status_request(path: object) -> bool:
+        return bool(status_provider) and urlsplit(str(path or "/")).path == status_path
 
     async def rejection_decision(source: str) -> tuple[HTTPStatus, Optional[int]]:
         delay, limited, retry_after = guard.register_failure(source)
@@ -233,6 +249,12 @@ def create_websocket_auth_process_request(
             source = _websocket_source(getattr(connection, "remote_address", None))
             if is_bearer_authorized(request.headers, token):
                 guard.clear(source)
+                if is_status_request(getattr(request, "path", "/")):
+                    status, body = status_response()
+                    response = connection.respond(status, body)
+                    response.headers["Content-Type"] = "application/json; charset=utf-8"
+                    response.headers["Cache-Control"] = "no-store"
+                    return response
                 return None
 
             status, retry_after = await rejection_decision(source)
@@ -250,6 +272,16 @@ def create_websocket_auth_process_request(
         source = "unknown"
         if is_bearer_authorized(request_headers, token):
             guard.clear(source)
+            if is_status_request(path):
+                status, body = status_response()
+                return (
+                    status,
+                    [
+                        ("Content-Type", "application/json; charset=utf-8"),
+                        ("Cache-Control", "no-store"),
+                    ],
+                    body.encode("utf-8"),
+                )
             return None
 
         status, retry_after = await rejection_decision(source)

@@ -35,7 +35,13 @@ class SocketManager:
             self._api_token,
             websockets.__version__,
             logger.warning,
+            status_provider=getattr(self.app, "runtime_status", None),
         )
+
+    @property
+    def is_running(self):
+        """Whether the product network listener is inside its serving lifecycle."""
+        return self._is_running
 
     def _check_port(self):
         """检查端口可用性"""
