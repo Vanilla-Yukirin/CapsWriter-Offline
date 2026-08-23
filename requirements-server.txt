@@ -20,3 +20,5 @@ tkhtmlview
 # CapsWriter Plus HTTP/Agent API
 fastapi>=0.116,<1
 uvicorn>=0.35,<1
+# Starlette TestClient used by the API contract tests
+httpx2>=2.12,<3
