@@ -46,6 +46,7 @@
 - [角色功能如何使用](docs/角色功能如何使用.md) — LLM 角色配置、输出模式、创建新角色
 - [识别语言如何配置](docs/识别语言如何配置.md) — 各引擎语言支持范围与配置方法
 - [文件转录功能如何使用](docs/文件转录功能如何使用.md) — 拖拽转字幕、时间戳对齐
+- [CapsWriter Plus HTTP / Agent API](docs/CapsWriter-Plus-HTTP-API.md) — 通过 6018/TCP 上传媒体并调用集中 ASR
 - [显卡加速的若干问题](docs/显卡加速的若干问题.md) — DirectML、Vulkan 加速配置
 - [模型下载的若干问题](docs/模型下载的若干问题.md) — 引擎选择、模型下载、目录结构
 - [常见问题](docs/常见问题.md) — FAQ
